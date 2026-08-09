@@ -9,7 +9,7 @@ mkdir -p "$tmp/bin" "$tmp/music/dotted" "$tmp/music/bracketed" \
     "$tmp/music/artist-track-title" "$tmp/music/track-suffix" "$tmp/music/compact-prefix"
 touch "$tmp/music/dotted/01. Gang Starr - You know my steez.mp3"
 touch "$tmp/music/bracketed/Pantera - The Great Southern Trendkill - [01] - The Great Southern Trendkill.mp3"
-touch "$tmp/music/artist-track-title/Slipknot - 01 - 515.mp3"
+touch "$tmp/music/artist-track-title/Slipknot - 03 - disasterpiece.mp3"
 touch "$tmp/music/track-suffix/Soul4Ya - Track 01.mp3"
 touch "$tmp/music/compact-prefix/01-A Tribe Called Quest-Phony Rappers.mp3"
 
@@ -31,8 +31,8 @@ output=$(PATH="$tmp/bin:$PATH" "$repo/mp3trackprefix" --dry-run "$tmp/music")
 [[ $output == *'->    "01 Gang Starr - You know my steez"'* ]]
 [[ $output == *'[DRY-RUN] Pantera - The Great Southern Trendkill - [01] - The Great Southern Trendkill.mp3'* ]]
 [[ $output == *'->    "01 The Great Southern Trendkill"'* ]]
-[[ $output == *'[DRY-RUN] Slipknot - 01 - 515.mp3'* ]]
-[[ $output == *'->    "01 515"'* ]]
+[[ $output == *'[DRY-RUN] Slipknot - 03 - disasterpiece.mp3'* ]]
+[[ $output == *'->    "03 disasterpiece"'* ]]
 [[ $output == *'[DRY-RUN] Soul4Ya - Track 01.mp3'* ]]
 [[ $output == *'->    "01 Soul4Ya"'* ]]
 [[ $output == *'[DRY-RUN] 01-A Tribe Called Quest-Phony Rappers.mp3'* ]]
