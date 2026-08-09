@@ -24,5 +24,6 @@ output=$(PATH="$tmp/bin:$PATH" "$repo/mp3trackprefix" --dry-run "$tmp/music")
 [[ $output == *'->    "01 The Great Southern Trendkill"'* ]]
 [[ $output != *'Missing track number:'* ]]
 [[ $output == *'Warnings: 0'* ]]
+[[ $output != *'Folders not processed correctly:'* ]]
 
 printf 'filename fallback tests passed\n'

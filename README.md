@@ -107,6 +107,10 @@ Problems that cause the complete folder to be skipped include:
 
 Folder outcomes are `[OK]` (already normalized), `[CHANGED]`, `[WARN]`
 (metadata problem), `[SKIPPED]` (dry-run writes suppressed), or `[ERROR]`.
+After the counters in the final summary, every folder that could not be processed
+correctly is listed again. This includes folders skipped because validation failed
+and folders in which writing a title failed; intentional dry-run suppression is
+not considered a processing failure.
 
 Exit status is `0` after a clean scan, `1` if one or more folders had incomplete
 or conflicting metadata, and `2` for invalid arguments, missing dependencies,
