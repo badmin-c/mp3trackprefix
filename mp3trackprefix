@@ -5,7 +5,7 @@
 set -o pipefail
 
 readonly PROGRAM=${0##*/}
-readonly VERSION=1.0.1
+readonly VERSION=1.0.2
 
 dry_run=false
 verbose=false
@@ -18,6 +18,7 @@ folders_skipped=0
 files_scanned=0
 titles_changed=0
 warnings=0
+failed_folders=()
 
 usage() {
     cat <<EOF
@@ -231,6 +232,7 @@ process_folder() {
             for part in "${parts[@]:1}"; do printf '         %s\n' "$part"; done
         done
         printf '       Folder skipped.\n'
+        failed_folders+=("$folder")
         ((folders_skipped++, warnings+=${#problems[@]}))
         return 1
     fi
@@ -265,6 +267,7 @@ process_folder() {
         if ! exiftool -quiet -overwrite_original_in_place -charset filename=UTF8 \
             "-Title=$NORMALIZED_TITLE" -- "${files[i]}"; then
             printf '[ERROR] Failed to write TITLE: %s\n' "${files[i]}" >&2
+            failed_folders+=("$folder")
             return 2
         fi
     done
@@ -289,14 +292,18 @@ main() {
 
     for folder in "${folders[@]}"; do
         process_folder "$folder"; result=$?
-        ((result == 1)) && status=1
-        ((result == 2)) && exit 2
+        if ((result == 1 && status == 0)); then status=1; fi
+        ((result == 2)) && status=2
     done
     printf '\nSummary:\n'
     printf 'Folders scanned: %d\nFolders changed: %d\nAlready correct: %d\nFolders skipped: %d\n' \
         "$folders_scanned" "$folders_changed" "$folders_ok" "$folders_skipped"
     printf 'MP3 files scanned: %d\nTitles changed: %d\nWarnings: %d\n' \
         "$files_scanned" "$titles_changed" "$warnings"
+    if ((${#failed_folders[@]})); then
+        printf 'Folders not processed correctly:\n'
+        printf '  %s\n' "${failed_folders[@]}"
+    fi
     return "$status"
 }
 
