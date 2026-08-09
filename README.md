@@ -1,5 +1,10 @@
 # mp3trackprefix
 
+> [!IMPORTANT]
+> **Disclaimer:** This tool was created 100% by OpenAI Codex. It is provided
+> without warranty; review the code and use it at your own risk, especially
+> before modifying valuable or irreplaceable music collections.
+
 `mp3trackprefix` is a conservative Linux command-line tool that prefixes each
 MP3's ID3 `TITLE` with its track number. It is intended for players such as the
 Mazda 6e that alphabetize songs by title rather than ordering them by the ID3
