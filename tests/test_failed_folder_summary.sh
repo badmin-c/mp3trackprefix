@@ -9,11 +9,16 @@ mkdir -p "$tmp/bin" "$tmp/music/invalid one" "$tmp/music/invalid two"
 touch "$tmp/music/invalid one/unknown.mp3"
 touch "$tmp/music/invalid two/also unknown.mp3"
 
-cat >"$tmp/bin/exiftool" <<'EOF'
+cat >"$tmp/bin/ffprobe" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod +x "$tmp/bin/exiftool"
+chmod +x "$tmp/bin/ffprobe"
+cat >"$tmp/bin/ffmpeg" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp/bin/ffmpeg"
 
 set +e
 output=$(PATH="$tmp/bin:$PATH" "$repo/mp3trackprefix" --dry-run "$tmp/music" 2>&1)
@@ -34,21 +39,25 @@ printf 'failed folder summary tests passed\n'
 rm -rf "$tmp/music"
 mkdir -p "$tmp/music/bad write" "$tmp/music/good write"
 touch "$tmp/music/bad write/01 Song.mp3" "$tmp/music/good write/01 Song.mp3"
-cat >"$tmp/bin/exiftool" <<'EOF'
+cat >"$tmp/bin/ffprobe" <<'EOF'
 #!/usr/bin/env bash
-for arg; do
-    case $arg in
-        -Track) printf '1\n'; exit 0 ;;
-        -Title) printf 'Song\n'; exit 0 ;;
-        -Title=*)
-            [[ ${!#} != *'/bad write/'* ]]
-            exit
-            ;;
-    esac
-done
+[[ $* == *format_tags=Track* ]] && printf '1\n'
+[[ $* == *format_tags=Title* ]] && printf 'Song\n'
 exit 0
 EOF
-chmod +x "$tmp/bin/exiftool"
+chmod +x "$tmp/bin/ffprobe"
+cat >"$tmp/bin/ffmpeg" <<'EOF'
+#!/usr/bin/env bash
+input=
+while (($#)); do
+    if [[ $1 == -i ]]; then input=$2; shift; fi
+    output=$1
+    shift
+done
+[[ $input != *'/bad write/'* ]] || exit 1
+: >"$output"
+EOF
+chmod +x "$tmp/bin/ffmpeg"
 
 set +e
 output=$(PATH="$tmp/bin:$PATH" "$repo/mp3trackprefix" "$tmp/music" 2>&1)

@@ -17,13 +17,13 @@ all other metadata are left intact.
 
 - Linux or another environment with GNU-style `find` and `sort`
 - Bash 4.4 or newer
-- [ExifTool](https://exiftool.org/) (`exiftool`), used for Unicode-safe ID3
-  reading and narrowly targeted title updates
+- [FFmpeg](https://ffmpeg.org/) (`ffmpeg` and `ffprobe`), used for ID3 metadata
+  reading and lossless MP3 remuxing with a narrowly targeted title update
 
 On Debian/Ubuntu:
 
 ```bash
-sudo apt install libimage-exiftool-perl
+sudo apt install ffmpeg
 ```
 
 ## Installation
@@ -93,8 +93,9 @@ CD1 - 01 - Song Title.mp3
 No file in the folder is modified unless every file has a positive track number
 and usable title, all track numbers are unique, and tag/filename evidence is
 consistent. Arbitrary numbers elsewhere in a filename are not guessed as track
-numbers. ExifTool is invoked with a `Title` assignment only, preserving other
-metadata and embedded artwork.
+numbers. FFmpeg copies every stream without re-encoding, maps the existing
+metadata, and overrides only `title`, preserving other metadata and embedded
+artwork. The completed temporary file atomically replaces the original.
 
 Problems that cause the complete folder to be skipped include:
 
