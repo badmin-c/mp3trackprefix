@@ -5,7 +5,7 @@
 set -o pipefail
 
 readonly PROGRAM=${0##*/}
-readonly VERSION=1.0.2
+readonly VERSION=1.1.0
 
 dry_run=false
 verbose=false
@@ -54,7 +54,8 @@ parse_args() {
 }
 
 check_dependencies() {
-    command -v exiftool >/dev/null 2>&1 || die 'required dependency not found: exiftool'
+    command -v ffprobe >/dev/null 2>&1 || die 'required dependency not found: ffprobe'
+    command -v ffmpeg >/dev/null 2>&1 || die 'required dependency not found: ffmpeg'
     command -v find >/dev/null 2>&1 || die 'required dependency not found: find'
     command -v sort >/dev/null 2>&1 || die 'required dependency not found: sort'
 }
@@ -66,13 +67,14 @@ trim() {
     printf '%s' "$value"
 }
 
-# Print the first populated spelling of a logical tag. ExifTool understands
-# ID3v2 encodings and returns decoded Unicode in the current UTF-8 locale.
+# Print the first populated spelling of a logical tag. ffprobe decodes ID3
+# metadata and emits only the value, without a display-oriented key prefix.
 read_tag() {
     local file=$1 value tag
     shift
     for tag; do
-        value=$(exiftool -s3 -charset filename=UTF8 "-$tag" -- "$file" 2>/dev/null) || return 1
+        value=$(ffprobe -v error -show_entries "format_tags=$tag" \
+            -of default=noprint_wrappers=1:nokey=1 -i "$file" 2>/dev/null) || return 1
         if [[ -n $value ]]; then printf '%s' "$value"; return 0; fi
     done
     return 0
@@ -259,13 +261,24 @@ process_folder() {
         return 0
     fi
 
-    # ExifTool updates only the named Title field. -overwrite_original_in_place
-    # avoids backup files while retaining all unrelated tags and embedded art.
+    # Remux every stream without re-encoding. Mapping all input streams and
+    # metadata retains audio, cover art, and unrelated tags; only Title is
+    # overridden. Write beside the source so the final rename is atomic.
     for ((i=0; i<count; i++)); do
         normalize_title "${tracks[i]}" "$width" "${titles[i]}"
         [[ $NORMALIZED_TITLE != "${titles[i]}" ]] || continue
-        if ! exiftool -quiet -overwrite_original_in_place -charset filename=UTF8 \
-            "-Title=$NORMALIZED_TITLE" -- "${files[i]}"; then
+        local temp
+        temp=$(mktemp --tmpdir="${files[i]%/*}" ".${files[i]##*/}.XXXXXX.mp3") || {
+            printf '[ERROR] Cannot create temporary file for: %s\n' "${files[i]}" >&2
+            failed_folders+=("$folder")
+            return 2
+        }
+        if ! ffmpeg -v error -nostdin -y -i "${files[i]}" -map 0 -c copy \
+            -map_metadata 0 -metadata "title=$NORMALIZED_TITLE" "$temp" ||
+           ! chmod --reference="${files[i]}" "$temp" ||
+           ! touch --reference="${files[i]}" "$temp" ||
+           ! mv -f -- "$temp" "${files[i]}"; then
+            rm -f -- "$temp"
             printf '[ERROR] Failed to write TITLE: %s\n' "${files[i]}" >&2
             failed_folders+=("$folder")
             return 2

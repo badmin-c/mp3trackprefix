@@ -9,12 +9,17 @@ mkdir -p "$tmp/bin" "$tmp/music/dotted" "$tmp/music/bracketed"
 touch "$tmp/music/dotted/01. Gang Starr - You know my steez.mp3"
 touch "$tmp/music/bracketed/Pantera - The Great Southern Trendkill - [01] - The Great Southern Trendkill.mp3"
 
-cat >"$tmp/bin/exiftool" <<'EOF'
+cat >"$tmp/bin/ffprobe" <<'EOF'
 #!/usr/bin/env bash
 # The fixtures intentionally have no tags, exercising filename-only fallback.
 exit 0
 EOF
-chmod +x "$tmp/bin/exiftool"
+chmod +x "$tmp/bin/ffprobe"
+cat >"$tmp/bin/ffmpeg" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp/bin/ffmpeg"
 
 output=$(PATH="$tmp/bin:$PATH" "$repo/mp3trackprefix" --dry-run "$tmp/music")
 
