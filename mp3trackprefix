@@ -5,7 +5,7 @@
 set -o pipefail
 
 readonly PROGRAM=${0##*/}
-readonly VERSION=1.0.0
+readonly VERSION=1.0.1
 
 dry_run=false
 verbose=false
@@ -99,7 +99,7 @@ parse_filename() {
     stem=${name%.[mM][pP]3}
     local -a tracks=() titles=()
 
-    if [[ $stem =~ ^([0-9]{1,3})([[:space:]]+-[[:space:]]+|[[:space:]]+|_+)(.+)$ ]]; then
+    if [[ $stem =~ ^([0-9]{1,3})([.][[:space:]]+|[[:space:]]+-[[:space:]]+|[[:space:]]+|_+)(.+)$ ]]; then
         tracks+=("$((10#${BASH_REMATCH[1]}))")
         candidate_title=${BASH_REMATCH[3]}
         # In the explicit NN_Title form, underscores conventionally stand for
@@ -108,6 +108,10 @@ parse_filename() {
         titles+=("$candidate_title")
     fi
     if [[ $stem =~ ^.+[[:space:]]-[[:space:]]([0-9]{1,3})[[:space:]]-[[:space:]](.+)$ ]]; then
+        tracks+=("$((10#${BASH_REMATCH[1]}))")
+        titles+=("${BASH_REMATCH[2]}")
+    fi
+    if [[ $stem =~ ^.+[[:space:]]-[[:space:]]\[([0-9]{1,3})\][[:space:]]-[[:space:]](.+)$ ]]; then
         tracks+=("$((10#${BASH_REMATCH[1]}))")
         titles+=("${BASH_REMATCH[2]}")
     fi
