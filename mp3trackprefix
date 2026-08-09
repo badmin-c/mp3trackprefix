@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+
+# Prefix MP3 titles with their track number without changing any other tag.
+# Bash 4.4+ is required for arrays and null-delimited mapfile input.
+set -o pipefail
+
+readonly PROGRAM=${0##*/}
+readonly VERSION=1.0.0
+
+dry_run=false
+verbose=false
+root=
+
+folders_scanned=0
+folders_changed=0
+folders_ok=0
+folders_skipped=0
+files_scanned=0
+titles_changed=0
+warnings=0
+
+usage() {
+    cat <<EOF
+Usage: $PROGRAM [OPTIONS] DIRECTORY
+
+Prefix each MP3 TITLE with its track number, one validated folder at a time.
+
+Options:
+  --dry-run   validate and show changes without writing tags
+  --verbose   show metadata and validation details
+  --help      show this help
+  --version   show version information
+EOF
+}
+
+die() { printf '[ERROR] %s\n' "$*" >&2; exit 2; }
+
+parse_args() {
+    while (($#)); do
+        case $1 in
+            --dry-run) dry_run=true ;;
+            --verbose) verbose=true ;;
+            --help) usage; exit 0 ;;
+            --version) printf '%s %s\n' "$PROGRAM" "$VERSION"; exit 0 ;;
+            --) shift; (($# == 1)) || die 'exactly one directory is required'; root=$1; break ;;
+            -*) die "unknown option: $1" ;;
+            *) [[ -z $root ]] || die 'exactly one directory is required'; root=$1 ;;
+        esac
+        shift
+    done
+    [[ -n $root ]] || die 'a directory argument is required'
+    [[ -d $root ]] || die "not a directory: $root"
+}
+
+check_dependencies() {
+    command -v exiftool >/dev/null 2>&1 || die 'required dependency not found: exiftool'
+    command -v find >/dev/null 2>&1 || die 'required dependency not found: find'
+    command -v sort >/dev/null 2>&1 || die 'required dependency not found: sort'
+}
+
+trim() {
+    local value=$1
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+# Print the first populated spelling of a logical tag. ExifTool understands
+# ID3v2 encodings and returns decoded Unicode in the current UTF-8 locale.
+read_tag() {
+    local file=$1 value tag
+    shift
+    for tag; do
+        value=$(exiftool -s3 -charset filename=UTF8 "-$tag" -- "$file" 2>/dev/null) || return 1
+        if [[ -n $value ]]; then printf '%s' "$value"; return 0; fi
+    done
+    return 0
+}
+
+# Sets PARSED_TRACK. Only an integer, optionally followed by /total, is valid.
+parse_tag_track() {
+    local raw
+    raw=$(trim "$1")
+    PARSED_TRACK=
+    [[ $raw =~ ^0*([0-9]+)(/0*([0-9]+))?$ ]] || return 1
+    PARSED_TRACK=$((10#${BASH_REMATCH[1]}))
+    ((PARSED_TRACK > 0)) || return 1
+    if [[ -n ${BASH_REMATCH[3]} ]]; then
+        local total=$((10#${BASH_REMATCH[3]}))
+        ((total > 0 && PARSED_TRACK <= total)) || return 1
+    fi
+}
+
+# Sets FILENAME_TRACK, FILENAME_TITLE, and FILENAME_STATE. We deliberately
+# accept only numbers at the start or surrounded by " - " delimiters. If both
+# forms match with different numbers/titles, the name is ambiguous.
+parse_filename() {
+    local name=${1##*/} stem candidate_track candidate_title
+    stem=${name%.[mM][pP]3}
+    local -a tracks=() titles=()
+
+    if [[ $stem =~ ^([0-9]{1,3})([[:space:]]+-[[:space:]]+|[[:space:]]+|_+)(.+)$ ]]; then
+        tracks+=("$((10#${BASH_REMATCH[1]}))")
+        candidate_title=${BASH_REMATCH[3]}
+        # In the explicit NN_Title form, underscores conventionally stand for
+        # spaces; this conversion is not applied to any less certain pattern.
+        if [[ ${BASH_REMATCH[2]} == _* ]]; then candidate_title=${candidate_title//_/ }; fi
+        titles+=("$candidate_title")
+    fi
+    if [[ $stem =~ ^.+[[:space:]]-[[:space:]]([0-9]{1,3})[[:space:]]-[[:space:]](.+)$ ]]; then
+        tracks+=("$((10#${BASH_REMATCH[1]}))")
+        titles+=("${BASH_REMATCH[2]}")
+    fi
+
+    FILENAME_TRACK= FILENAME_TITLE= FILENAME_STATE=none
+    ((${#tracks[@]})) || return 0
+    candidate_track=${tracks[0]}; candidate_title=${titles[0]}
+    if ((candidate_track == 0)) || [[ -z $(trim "$candidate_title") ]]; then
+        FILENAME_STATE=invalid; return 0
+    fi
+    local i
+    for ((i=1; i<${#tracks[@]}; i++)); do
+        if [[ ${tracks[i]} != "$candidate_track" || ${titles[i]} != "$candidate_title" ]]; then
+            FILENAME_STATE=ambiguous; return 0
+        fi
+    done
+    FILENAME_STATE=valid
+    FILENAME_TRACK=$candidate_track
+    FILENAME_TITLE=$(trim "$candidate_title")
+}
+
+normalize_title() {
+    local track=$1 width=$2 title=$3 prefix rest
+    printf -v prefix "%0${width}d" "$track"
+    # Strip only a leading numeric prefix that represents this exact track.
+    if [[ $title =~ ^0*([0-9]+)([[:space:]]*[-._]?[[:space:]]+)(.+)$ ]] &&
+       ((10#${BASH_REMATCH[1]} == track)); then
+        rest=${BASH_REMATCH[3]}
+    else
+        rest=$title
+    fi
+    rest=$(trim "$rest")
+    NORMALIZED_TITLE="$prefix $rest"
+}
+
+warn_folder() {
+    local folder=$1 count=$2 complete=$3
+    printf '[WARN] %s\n' "$folder"
+    printf '       %d MP3 files found\n' "$count"
+    printf '       Track information complete: %d/%d\n' "$complete" "$count"
+}
+
+process_folder() {
+    local folder=$1 file base raw_track title album artist albumartist disc
+    local -a files=() tracks=() titles=() problems=()
+    local complete=0 max_track=0
+    mapfile -d '' -t files < <(find "$folder" -maxdepth 1 -type f -iname '*.mp3' -print0 | sort -z)
+    local count=${#files[@]}
+    ((folders_scanned++, files_scanned+=count))
+
+    for file in "${files[@]}"; do
+        base=${file##*/}
+        raw_track=$(read_tag "$file" Track TrackNumber) || { problems+=("Cannot read metadata: $base"); tracks+=(0); titles+=(""); continue; }
+        local metadata_failed=false
+        title=$(read_tag "$file" Title) || metadata_failed=true
+        disc=$(read_tag "$file" DiscNumber Disc PartOfSet) || metadata_failed=true
+        album=$(read_tag "$file" Album) || metadata_failed=true
+        artist=$(read_tag "$file" AlbumArtist Artist) || metadata_failed=true
+        albumartist=$(read_tag "$file" AlbumArtist) || metadata_failed=true
+        if $metadata_failed; then
+            problems+=("Cannot read metadata: $base"); tracks+=(0); titles+=(""); continue
+        fi
+        parse_filename "$file"
+
+        $verbose && printf '[INFO] %s\n       TRACK=%q TITLE=%q DISC=%q ALBUM=%q ARTIST=%q ALBUMARTIST=%q\n' \
+            "$file" "$raw_track" "$title" "$disc" "$album" "$artist" "$albumartist"
+
+        local track=0
+        if [[ -n $raw_track ]]; then
+            if ! parse_tag_track "$raw_track"; then
+                problems+=("Invalid TRACK \"$raw_track\": $base")
+            else
+                track=$PARSED_TRACK
+            fi
+        elif [[ $FILENAME_STATE == valid ]]; then
+            track=$FILENAME_TRACK
+        else
+            problems+=("Missing track number: $base")
+        fi
+
+        case $FILENAME_STATE in
+            ambiguous) problems+=("Ambiguous filename parsing: $base") ;;
+            invalid) problems+=("Invalid filename track/title pattern: $base") ;;
+            valid)
+                if ((track > 0 && FILENAME_TRACK != track)); then
+                    problems+=("Track number conflict: $base|ID3 TRACK: $track|Filename: $FILENAME_TRACK")
+                fi
+                ;;
+        esac
+
+        if [[ -z $(trim "$title") ]]; then
+            if [[ $FILENAME_STATE == valid ]]; then title=$FILENAME_TITLE
+            else problems+=("Missing TITLE: $base"); fi
+        fi
+        tracks+=("$track"); titles+=("$title")
+        if ((track > 0)) && [[ -n $(trim "$title") ]]; then ((complete++)); fi
+        ((track > max_track)) && max_track=$track
+    done
+
+    # Duplicate detection happens only after every file has been analyzed.
+    declare -A owners=()
+    local i track
+    for ((i=0; i<count; i++)); do
+        track=${tracks[i]}
+        ((track > 0)) || continue
+        if [[ -n ${owners[$track]+x} ]]; then
+            problems+=("Duplicate track number $track: ${owners[$track]} and ${files[i]##*/}")
+        else owners[$track]=${files[i]##*/}; fi
+    done
+
+    if ((${#problems[@]})); then
+        warn_folder "$folder" "$count" "$complete"
+        local problem part
+        for problem in "${problems[@]}"; do
+            IFS='|' read -r -a parts <<< "$problem"
+            printf '       %s\n' "${parts[0]}"
+            for part in "${parts[@]:1}"; do printf '         %s\n' "$part"; done
+        done
+        printf '       Folder skipped.\n'
+        ((folders_skipped++, warnings+=${#problems[@]}))
+        return 1
+    fi
+
+    local basis=$max_track width=2 changed=0 new_title
+    ((count > basis)) && basis=$count
+    ((${#basis} > width)) && width=${#basis}
+    for ((i=0; i<count; i++)); do
+        normalize_title "${tracks[i]}" "$width" "${titles[i]}"
+        new_title=$NORMALIZED_TITLE
+        if [[ $new_title != "${titles[i]}" ]]; then
+            ((changed++))
+            printf '[%s] %s\n' "$($dry_run && printf 'DRY-RUN' || printf 'UPDATE')" "${files[i]##*/}"
+            printf '          TITLE: "%s"\n           ->    "%s"\n' "${titles[i]}" "$new_title"
+        fi
+    done
+
+    if ((changed == 0)); then
+        printf '[OK] %s\n     Tracks: %d\n     No changes required\n' "$folder" "$count"
+        ((folders_ok++)); return 0
+    fi
+    if $dry_run; then
+        printf '[SKIPPED] %s\n          Tracks: %d\n          Dry-run; titles that would change: %d\n' "$folder" "$count" "$changed"
+        return 0
+    fi
+
+    # ExifTool updates only the named Title field. -overwrite_original_in_place
+    # avoids backup files while retaining all unrelated tags and embedded art.
+    for ((i=0; i<count; i++)); do
+        normalize_title "${tracks[i]}" "$width" "${titles[i]}"
+        [[ $NORMALIZED_TITLE != "${titles[i]}" ]] || continue
+        if ! exiftool -quiet -overwrite_original_in_place -charset filename=UTF8 \
+            "-Title=$NORMALIZED_TITLE" -- "${files[i]}"; then
+            printf '[ERROR] Failed to write TITLE: %s\n' "${files[i]}" >&2
+            return 2
+        fi
+    done
+    printf '[CHANGED] %s\n          Tracks: %d\n          Updated titles: %d\n' "$folder" "$count" "$changed"
+    ((folders_changed++, titles_changed+=changed))
+}
+
+main() {
+    parse_args "$@"
+    check_dependencies
+    local -a folders=()
+    declare -A found_folders=()
+    local file folder status=0 result
+    # Convert files to directory names without ever parsing display-oriented ls.
+    while IFS= read -r -d '' file; do
+        folder=${file%/*}; [[ $folder == "$file" ]] && folder=.
+        if [[ -z ${found_folders[$folder]+x} ]]; then
+            folders+=("$folder")
+            found_folders[$folder]=1
+        fi
+    done < <(find "$root" -type f -iname '*.mp3' -print0 | sort -z)
+
+    for folder in "${folders[@]}"; do
+        process_folder "$folder"; result=$?
+        ((result == 1)) && status=1
+        ((result == 2)) && exit 2
+    done
+    printf '\nSummary:\n'
+    printf 'Folders scanned: %d\nFolders changed: %d\nAlready correct: %d\nFolders skipped: %d\n' \
+        "$folders_scanned" "$folders_changed" "$folders_ok" "$folders_skipped"
+    printf 'MP3 files scanned: %d\nTitles changed: %d\nWarnings: %d\n' \
+        "$files_scanned" "$titles_changed" "$warnings"
+    return "$status"
+}
+
+main "$@"
