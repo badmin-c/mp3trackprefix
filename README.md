@@ -84,10 +84,12 @@ filename can supply a missing track/title only for deliberately narrow formats:
 01 - Song Title.mp3
 01. Song Title.mp3
 01 Song Title.mp3
+01-Song Title.mp3
 01_Song_Title.mp3
 Artist - Album - 01 - Song Title.mp3
 Artist - Album - [01] - Song Title.mp3
 CD1 - 01 - Song Title.mp3
+Song Title - Track 01.mp3
 ```
 
 No file in the folder is modified unless every file has a positive track number
