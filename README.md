@@ -39,6 +39,51 @@ install -Dm755 mp3trackprefix "$HOME/.local/bin/mp3trackprefix"
 
 Ensure `$HOME/.local/bin` is in your `PATH`.
 
+### Windows (WSL, tested)
+
+The recommended way to use `mp3trackprefix` on Windows is through the Windows
+Subsystem for Linux (WSL). **The WSL setup has been tested.** If WSL is not yet
+available, install it from an elevated PowerShell prompt with `wsl --install`
+and complete the short setup of the default Ubuntu distribution; see
+[Microsoft's WSL documentation](https://learn.microsoft.com/windows/wsl/install)
+for details.
+
+Inside the WSL terminal, install FFmpeg and the script just as on Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+install -Dm755 mp3trackprefix "$HOME/.local/bin/mp3trackprefix"
+```
+
+Windows drives are mounted below `/mnt`. For example, process music on drive
+`D:` with a dry run first:
+
+```bash
+mp3trackprefix --dry-run /mnt/d/Music
+mp3trackprefix /mnt/d/Music
+```
+
+### macOS (untested)
+
+**macOS support has not been tested.** The system-provided Bash and command-line
+tools do not meet all requirements, so install current Bash, FFmpeg, and the GNU
+utilities with [Homebrew](https://brew.sh/):
+
+```bash
+brew install bash ffmpeg findutils coreutils
+```
+
+Make the Homebrew and GNU utility directories take precedence for the current
+terminal, then run or install the script as described above:
+
+```bash
+export PATH="$(brew --prefix)/bin:$(brew --prefix findutils)/libexec/gnubin:$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+./mp3trackprefix --dry-run "$HOME/Music"
+```
+
+Add that `PATH` setting to your shell configuration if you want it to persist.
+
 ## Usage
 
 ```bash
